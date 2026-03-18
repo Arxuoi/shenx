@@ -107,26 +107,49 @@ async function callNazeAPI(prompt, userId) {
         messages.push({ role: 'user', content: prompt });
         if (messages.length > 10) messages = messages.slice(-10);
 
+        // ✅ FIX: Ganti 'prompt' jadi 'query'
         const params = new URLSearchParams({
             messages: JSON.stringify(messages),
-            prompt: prompt,
+            query: prompt,  // <-- GANTI INI (bukan 'prompt')
             apikey: config.NAZE_API.apiKey
         });
 
         const url = `${config.NAZE_API.baseUrl}?${params.toString()}`;
-        const response = await axios.get(url, { timeout: 60000 });
+        console.log('🌐 Calling API...');  // Debug log
         
-        let aiResponse = typeof response.data === 'string' ? response.data : 
-                        response.data.result || response.data.data || 
-                        response.data.message || JSON.stringify(response.data);
+        const response = await axios.get(url, { 
+            timeout: 60000,
+            headers: { 'User-Agent': 'Mozilla/5.0' }
+        });
+
+        console.log('📥 Response:', response.data);  // Debug log
+
+        let aiResponse = '';
+        
+        if (typeof response.data === 'string') {
+            aiResponse = response.data;
+        } else if (response.data.result) {
+            aiResponse = response.data.result;
+        } else if (response.data.data) {
+            aiResponse = response.data.data;
+        } else if (response.data.message) {
+            aiResponse = response.data.message;
+        } else if (response.data.error) {
+            aiResponse = '❌ Error: ' + response.data.error;
+        } else {
+            aiResponse = JSON.stringify(response.data);
+        }
 
         messages.push({ role: 'assistant', content: aiResponse });
         chatHistory.set(userId, messages);
         return aiResponse;
+
     } catch (error) {
-        return '❌ Gagal menghubungi AI.';
+        console.error('❌ API Error:', error.message);
+        return '❌ Gagal menghubungi AI: ' + error.message;
     }
 }
+
 
 console.log('🚀 Starting Naze AI Bot...');
 console.log('📱 Tunggu QR Code...\n');
