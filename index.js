@@ -107,49 +107,41 @@ async function callNazeAPI(prompt, userId) {
         messages.push({ role: 'user', content: prompt });
         if (messages.length > 10) messages = messages.slice(-10);
 
-        // ✅ FIX: Ganti 'prompt' jadi 'query'
         const params = new URLSearchParams({
             messages: JSON.stringify(messages),
-            query: prompt,  // <-- GANTI INI (bukan 'prompt')
+            query: prompt,
             apikey: config.NAZE_API.apiKey
         });
 
         const url = `${config.NAZE_API.baseUrl}?${params.toString()}`;
-        console.log('🌐 Calling API...');  // Debug log
+        const response = await axios.get(url, { timeout: 60000 });
         
-        const response = await axios.get(url, { 
-            timeout: 60000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
+        console.log('📥 Response:', response.data); // Debug
 
-        console.log('📥 Response:', response.data);  // Debug log
-
+        // ✅ FIX: Ambil message dari result
         let aiResponse = '';
         
-        if (typeof response.data === 'string') {
+        if (response.data.success && response.data.result) {
+            // Format baru API: result.message
+            aiResponse = response.data.result.message || 'No response';
+        } else if (typeof response.data === 'string') {
             aiResponse = response.data;
-        } else if (response.data.result) {
-            aiResponse = response.data.result;
-        } else if (response.data.data) {
-            aiResponse = response.data.data;
         } else if (response.data.message) {
             aiResponse = response.data.message;
-        } else if (response.data.error) {
-            aiResponse = '❌ Error: ' + response.data.error;
         } else {
             aiResponse = JSON.stringify(response.data);
         }
 
         messages.push({ role: 'assistant', content: aiResponse });
         chatHistory.set(userId, messages);
-        return aiResponse;
+        
+        return aiResponse; // ✅ Pastikan return string
 
     } catch (error) {
         console.error('❌ API Error:', error.message);
-        return '❌ Gagal menghubungi AI: ' + error.message;
+        return '❌ Gagal menghubungi AI.';
     }
 }
-
 
 console.log('🚀 Starting Naze AI Bot...');
 console.log('📱 Tunggu QR Code...\n');
