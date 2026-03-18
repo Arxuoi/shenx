@@ -69,7 +69,7 @@ async function handleCommand(sock, sender, text, msg) {
         case 'help':
         case 'menu':
             const menu = `
-🤖 *SHENX*
+👽 *SHENX*
 
 *Perintah:*
 ${config.PREFIX}help - Menu bantuan
@@ -80,8 +80,8 @@ ${config.PREFIX}brat <text> - Brat Generator
 ${config.PREFIX}clear - Hapus history chat
 ${config.PREFIX}owner - Hubungi owner
 
-*Cara Pakai:*
-Kirim pesan apa saja untuk chat langsung dengan AI!
+*MEMEK*
+SHENXHUNTER
             `;
             await sock.sendMessage(sender, { text: menu });
             break;
@@ -186,24 +186,16 @@ async function callNazeAPI(prompt, userId) {
 // ==================== DOWNLOAD ALL IN ONE ====================
 async function downloadAIO(sock, sender, url) {
     try {
-        // ✅ FIX: Bersihkan URL TikTok (hapus parameter tambahan)
         let cleanUrl = url;
         
         if (url.includes('tiktok.com')) {
-            // Ambil hanya bagian utama URL
             const match = url.match(/(https:\/\/(?:www\.)?tiktok\.com\/@[\w.]+\/video\/\d+)/);
-            if (match) {
-                cleanUrl = match[1];
-            } else {
-                // Untuk URL short (vt.tiktok.com)
+            if (match) cleanUrl = match[1];
+            else {
                 const shortMatch = url.match(/(https:\/\/vt\.tiktok\.com\/\w+)/);
-                if (shortMatch) {
-                    cleanUrl = shortMatch[1];
-                }
+                if (shortMatch) cleanUrl = shortMatch[1];
             }
         }
-        
-        console.log('🌐 Clean URL:', cleanUrl);
         
         await sock.sendMessage(sender, { text: '⏳ Mengambil media...' });
         
@@ -220,33 +212,43 @@ async function downloadAIO(sock, sender, url) {
         
         const result = response.data.result;
         
+        // ✅ FIX: Handle URL tunnel
+        let videoUrl = result.url || result.video;
+        
+        if (!videoUrl) {
+            await sock.sendMessage(sender, { text: '❌ URL video tidak ditemukan' });
+            return;
+        }
+        
         await sock.sendMessage(sender, { 
-            text: `✅ *Download Berhasil*\n\n📱 Platform: ${result.platform || 'Unknown'}\n👤 Author: ${result.author || 'Unknown'}` 
+            text: `✅ *Download Berhasil*\n\n📱 Platform: ${result.platform || 'TikTok'}\n👤 Author: ${result.author || 'Unknown'}\n\n⏳ Mengirim video...` 
         });
         
-        if (result.video) {
+        // ✅ FIX: Kirim sebagai dokumen kalau tunnel
+        try {
             await sock.sendMessage(sender, {
-                video: { url: result.video },
+                video: { url: videoUrl },
                 caption: '🎥 Video'
             });
-        } else if (result.audio) {
-            await sock.sendMessage(sender, {
-                audio: { url: result.audio },
-                mimetype: 'audio/mpeg'
+        } catch (videoError) {
+            // Kalau gagal, kirim link saja
+            await sock.sendMessage(sender, { 
+                text: `✅ *Download Link*\n\n🎥 Video: ${videoUrl}\n\nKlik link untuk download.` 
             });
         }
         
     } catch (error) {
         console.error('Download Error:', error.message);
-        console.error('Response:', error.response?.data);
         await sock.sendMessage(sender, { text: '❌ Error: ' + error.message });
     }
 }
 
 
+
 // ==================== HD REMINI ====================
 async function hdRemini(sock, sender, msg) {
     try {
+        // ✅ FIX: Cek imageMessage dengan caption
         const imageMessage = msg.message?.imageMessage || 
                             msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
         
@@ -255,65 +257,45 @@ async function hdRemini(sock, sender, msg) {
             return;
         }
         
-        await sock.sendMessage(sender, { text: '⏳ Mengunduh foto...' });
+        await sock.sendMessage(sender, { text: '⏳ Proses HD...' });
         
+        // Download
         const stream = await sock.downloadContentFromMessage(imageMessage, 'image');
         let buffer = Buffer.from([]);
+        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
         
-        for await (const chunk of stream) {
-            buffer = Buffer.concat([buffer, chunk]);
-        }
-        
-        await sock.sendMessage(sender, { text: '⏳ Upload ke server...' });
-        
-        // ✅ FIX: Upload dengan benar
+        // Upload ke Naze
         const form = new FormData();
-        form.append('file', buffer, { filename: 'image.jpg', contentType: 'image/jpeg' });
+        form.append('file', buffer, { filename: 'image.jpg' });
         
         const uploadRes = await axios.post(
             `https://api.naze.biz.id/upload/v3?apikey=${config.NAZE_API.apiKey}`, 
             form, 
-            {
-                headers: form.getHeaders(),
-                timeout: 60000
-            }
+            { headers: form.getHeaders(), timeout: 60000 }
         );
         
-        console.log('📤 Upload response:', uploadRes.data);
+        const imageUrl = uploadRes.data.result?.url || uploadRes.data.url;
+        if (!imageUrl) throw new Error('Upload gagal');
         
-        const imageUrl = uploadRes.data.result?.url || uploadRes.data.url || uploadRes.data;
+        // HD
+        const hdRes = await axios.get(
+            `https://api.naze.biz.id/tools/hd?set=4&url=${encodeURIComponent(imageUrl)}&apikey=${config.NAZE_API.apiKey}`,
+            { timeout: 120000 }
+        );
         
-        if (!imageUrl || !imageUrl.startsWith('http')) {
-            await sock.sendMessage(sender, { text: '❌ Gagal upload: ' + JSON.stringify(uploadRes.data) });
-            return;
-        }
-        
-        console.log('📤 Uploaded:', imageUrl);
-        
-        await sock.sendMessage(sender, { text: '⏳ Proses HD...' });
-        
-        const apiUrl = `https://api.naze.biz.id/tools/hd?set=4&url=${encodeURIComponent(imageUrl)}&apikey=${config.NAZE_API.apiKey}`;
-        
-        const response = await axios.get(apiUrl, { timeout: 120000 });
-        
-        console.log('📥 HD response:', response.data);
-        
-        if (!response.data.status || !response.data.result) {
-            await sock.sendMessage(sender, { text: '❌ Gagal HD: ' + JSON.stringify(response.data) });
-            return;
-        }
+        if (!hdRes.data.result) throw new Error('HD gagal');
         
         await sock.sendMessage(sender, {
-            image: { url: response.data.result },
-            caption: '✅ *HD Berhasil!*'
+            image: { url: hdRes.data.result },
+            caption: '✅ HD Berhasil!'
         });
         
     } catch (error) {
         console.error('HD Error:', error.message);
-        console.error('Response:', error.response?.data);
         await sock.sendMessage(sender, { text: '❌ Error: ' + error.message });
     }
 }
+
 
 // ==================== BRAT GENERATOR ====================
 async function bratGenerator(sock, sender, text) {
