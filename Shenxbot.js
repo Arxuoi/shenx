@@ -42,37 +42,32 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-    const msg = m.messages[0];
-    if (msg.key.fromMe || !msg.message) return;
-    
-    const sender = msg.key.remoteJid;
-    
-    // ✅ FIX: Cek semua jenis pesan
-    let messageText = '';
-    
-    if (msg.message.conversation) {
-        messageText = msg.message.conversation;
-    } else if (msg.message.extendedTextMessage?.text) {
-        messageText = msg.message.extendedTextMessage.text;
-    } else if (msg.message.imageMessage?.caption) {
-        messageText = msg.message.imageMessage.caption;
-    } else if (msg.message.videoMessage?.caption) {
-        messageText = msg.message.videoMessage.caption;
-    }
-    
-    console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
+        const msg = m.messages[0];
+        if (msg.key.fromMe || !msg.message) return;
+        
+        const sender = msg.key.remoteJid;
+        
+        let messageText = '';
+        if (msg.message.conversation) {
+            messageText = msg.message.conversation;
+        } else if (msg.message.extendedTextMessage?.text) {
+            messageText = msg.message.extendedTextMessage.text;
+        } else if (msg.message.imageMessage?.caption) {
+            messageText = msg.message.imageMessage.caption;
+        } else if (msg.message.videoMessage?.caption) {
+            messageText = msg.message.videoMessage.caption;
+        }
+        
+        console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
 
-    if (messageText.startsWith(config.PREFIX)) {
-        await handleCommand(sock, sender, messageText, msg);
-    } else if (messageText) {
-        // Hanya chat AI kalau ada text
-        await handleAIChat(sock, sender, messageText);
-    }
-});
-    
+        if (messageText.startsWith(config.PREFIX)) {
+            await handleCommand(sock, sender, messageText, msg);
+        } else if (messageText) {
+            await handleAIChat(sock, sender, messageText);
+        }
+    });
 }
 
-// ==================== HANDLE COMMAND ====================
 async function handleCommand(sock, sender, text, msg) {
     const args = text.slice(config.PREFIX.length).trim().split(' ');
     const command = args.shift().toLowerCase();
@@ -81,21 +76,18 @@ async function handleCommand(sock, sender, text, msg) {
     switch(command) {
         case 'help':
         case 'menu':
-            const menu = `
-👽 *SHENX*
+            const menu = `🤖 *NAZE AI BOT*
 
 *Perintah:*
 ${config.PREFIX}help - Menu bantuan
 ${config.PREFIX}ai <pertanyaan> - Chat dengan AI
-${config.PREFIX}tiktok <url> - Download video (All in One)
-${config.PREFIX}hd - HD Remini (kirim/reply foto)
+${config.PREFIX}tiktok <url> - Download video TikTok
 ${config.PREFIX}brat <text> - Brat Generator
 ${config.PREFIX}clear - Hapus history chat
 ${config.PREFIX}owner - Hubungi owner
 
-*MEMEK*
-SHENXHUNTER
-            `;
+*Cara Pakai:*
+Kirim pesan apa saja untuk chat langsung dengan AI!`;
             await sock.sendMessage(sender, { text: menu });
             break;
 
@@ -111,17 +103,11 @@ SHENXHUNTER
 
         case 'tiktok':
         case 'tt':
-        case 'download':
             if (!query) {
                 await sock.sendMessage(sender, { text: '❌ Contoh: ' + config.PREFIX + 'tiktok https://vt.tiktok.com/xxxxx' });
                 return;
             }
-            await downloadAIO(sock, sender, query);
-            break;
-
-        case 'hd':
-        case 'remini':
-            await hdRemini(sock, sender, msg);
+            await downloadTikTok(sock, sender, query);
             break;
 
         case 'brat':
@@ -146,7 +132,6 @@ SHENXHUNTER
     }
 }
 
-// ==================== HANDLE AI CHAT ====================
 async function handleAIChat(sock, sender, text) {
     try {
         await sock.sendPresenceUpdate('composing', sender);
@@ -158,7 +143,6 @@ async function handleAIChat(sock, sender, text) {
     }
 }
 
-// ==================== CALL NAZE API ====================
 async function callNazeAPI(prompt, userId) {
     try {
         let messages = chatHistory.get(userId) || [];
@@ -196,8 +180,7 @@ async function callNazeAPI(prompt, userId) {
     }
 }
 
-// ==================== DOWNLOAD ALL IN ONE ====================
-async function downloadAIO(sock, sender, url) {
+async function downloadTikTok(sock, sender, url) {
     try {
         let cleanUrl = url;
         
@@ -216,17 +199,13 @@ async function downloadAIO(sock, sender, url) {
         
         const response = await axios.get(apiUrl, { timeout: 60000 });
         
-        console.log('📥 Response:', response.data);
-        
         if (!response.data.status || !response.data.result) {
             await sock.sendMessage(sender, { text: '❌ Gagal: ' + (response.data.message || 'Unknown error') });
             return;
         }
         
         const result = response.data.result;
-        
-        // ✅ FIX: Handle URL tunnel
-        let videoUrl = result.url || result.video;
+        const videoUrl = result.url || result.video;
         
         if (!videoUrl) {
             await sock.sendMessage(sender, { text: '❌ URL video tidak ditemukan' });
@@ -237,90 +216,23 @@ async function downloadAIO(sock, sender, url) {
             text: `✅ *Download Berhasil*\n\n📱 Platform: ${result.platform || 'TikTok'}\n👤 Author: ${result.author || 'Unknown'}\n\n⏳ Mengirim video...` 
         });
         
-        /// Di downloadAIO, ganti bagian kirim video:
-
-try {
-    await sock.sendMessage(sender, {
-        video: { url: videoUrl },
-        caption: '🎥 Video'
-    });
-} catch (videoError) {
-    console.error('Video send error:', videoError.message);
-    // ✅ FIX: Kirim link saja
-    await sock.sendMessage(sender, { 
-        text: `✅ *Download Berhasil*\n\n🎥 Video: ${videoUrl}\n\nKlik link untuk download.` 
-    });
-}
-
-// ==================== HD REMINI ====================
-async function hdRemini(sock, sender, msg) {
-    try {
-        // Cek apakah ada foto
-        const imageMessage = msg.message?.imageMessage;
-        
-        if (!imageMessage) {
-            await sock.sendMessage(sender, { 
-                text: '❌ Kirim foto dengan caption *.hd*' 
+        try {
+            await sock.sendMessage(sender, {
+                video: { url: videoUrl },
+                caption: '🎥 Video'
             });
-            return;
+        } catch (videoError) {
+            await sock.sendMessage(sender, { 
+                text: `✅ *Link Download*\n\n🎥 Video: ${videoUrl}` 
+            });
         }
-        
-        await sock.sendMessage(sender, { text: '⏳ Proses HD...' });
-        
-        // Download foto
-        const stream = await sock.downloadContentFromMessage(imageMessage, 'image');
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream) {
-            buffer = Buffer.concat([buffer, chunk]);
-        }
-        
-        // Upload
-        const form = new FormData();
-        form.append('file', buffer, { filename: 'image.jpg' });
-        
-        const uploadRes = await axios.post(
-            `https://api.naze.biz.id/upload/v3?apikey=${config.NAZE_API.apiKey}`, 
-            form, 
-            { headers: form.getHeaders(), timeout: 60000 }
-        );
-        
-        console.log('Upload response:', uploadRes.data);
-        
-        const imageUrl = uploadRes.data.result?.url || uploadRes.data.url;
-        
-        if (!imageUrl) {
-            await sock.sendMessage(sender, { text: '❌ Upload gagal' });
-            return;
-        }
-        
-        // HD
-        const hdRes = await axios.get(
-            `https://api.naze.biz.id/tools/hd?set=4&url=${encodeURIComponent(imageUrl)}&apikey=${config.NAZE_API.apiKey}`,
-            { timeout: 120000 }
-        );
-        
-        console.log('HD response:', hdRes.data);
-        
-        if (!hdRes.data.result) {
-            await sock.sendMessage(sender, { text: '❌ HD gagal: ' + JSON.stringify(hdRes.data) });
-            return;
-        }
-        
-        // Kirim hasil
-        await sock.sendMessage(sender, {
-            image: { url: hdRes.data.result },
-            caption: '✅ HD Berhasil!'
-        });
         
     } catch (error) {
-        console.error('HD Error:', error.message);
+        console.error('Download Error:', error.message);
         await sock.sendMessage(sender, { text: '❌ Error: ' + error.message });
     }
 }
-        
 
-
-// ==================== BRAT GENERATOR ====================
 async function bratGenerator(sock, sender, text) {
     try {
         await sock.sendMessage(sender, { text: '⏳ Membuat gambar brat...' });
@@ -352,4 +264,3 @@ console.log('🚀 Starting Naze AI Bot...');
 console.log('📱 Tunggu QR Code...\n');
 
 connectToWhatsApp();
-        
