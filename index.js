@@ -230,8 +230,8 @@ async function bratGenerator(sock, sender, text) {
             responseType: 'arraybuffer'
         });
         
-        // Simpan sementara
-        const path = `/tmp/brat_${Date.now()}.png`;
+        // ✅ FIX: Ganti path ke folder project
+        const path = `./brat_${Date.now()}.png`;
         fs.writeFileSync(path, response.data);
         
         // Kirim gambar
@@ -245,9 +245,10 @@ async function bratGenerator(sock, sender, text) {
         
     } catch (error) {
         console.error('Brat Error:', error.message);
-        await sock.sendMessage(sender, { text: '❌ Gagal membuat gambar brat' });
+        await sock.sendMessage(sender, { text: '❌ Gagal membuat gambar brat: ' + error.message });
     }
-}
+    }
+
 
 console.log('🚀 Starting Naze AI Bot...');
 console.log('📱 Tunggu QR Code...\n');
