@@ -2,12 +2,21 @@ const {
     default: makeWASocket, 
     useMultiFileAuthState, 
     DisconnectReason,
-    fetchLatestBaileysVersion 
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore  // Tambah ini
 } = require('@whiskeysockets/baileys');
 const axios = require('axios');
-const qrcode = require('qrcode-terminal');
+const readline = require('readline');  // Tambah ini untuk input
 const fs = require('fs');
 const config = require('./config');
+
+// Setup readline untuk input pairing code
+const rl = readline.createInterface({ 
+    input: process.stdin, 
+    output: process.stdout 
+});
+
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
 // Simpan history chat per user
 const chatHistory = new Map();
@@ -16,55 +25,73 @@ async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const { version } = await fetchLatestBaileysVersion();
     
+    // Tanya nomor WhatsApp
+    const phoneNumber = await question('📱 Masukkan nomor WhatsApp (628xxxxx): ');
+    
     const sock = makeWASocket({
         version,
-        printQRInTerminal: true,
-        auth: state,
-        browser: ['NazeBot', 'Chrome', '1.0.0']
+        printQRInTerminal: false,  // Matikan QR
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, console),
+        },
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        logger: console,
+        markOnlineOnConnect: true,
     });
+
+    // Pairing code logic
+    if (!sock.authState.creds.registered) {
+        console.log('⏳ Requesting pairing code...');
+        
+        try {
+            const code = await sock.requestPairingCode(phoneNumber);
+            console.log('\n🔑 PAIRING CODE ANDA:');
+            console.log('═══════════════════════');
+            console.log('       ' + code);
+            console.log('═══════════════════════');
+            console.log('Buka WhatsApp → Menu → Perangkat Tertaut → Tautkan Perangkat\n');
+        } catch (err) {
+            console.error('❌ Gagal request pairing code:', err.message);
+            process.exit(1);
+        }
+    }
 
     // Save credentials
     sock.ev.on('creds.update', saveCreds);
 
     // Handle connection
     sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-            console.log('\n📱 SCAN QR CODE DI ATAS DENGAN WHATSAPP ANDA\n');
-        }
+        const { connection, lastDisconnect } = update;
         
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log('❌ Koneksi terputus, mencoba reconnect...');
+            console.log('❌ Koneksi terputus, reconnecting...');
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
             console.log('✅ BOT BERHASIL TERHUBUNG!');
             console.log('🤖 Siap menerima pesan...\n');
+            rl.close();  // Tutup readline setelah connect
         }
     });
 
-    // Handle pesan masuk
+    // Handle pesan masuk (sama seperti sebelumnya)
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         
-        // Skip jika pesan dari bot sendiri atau status
         if (msg.key.fromMe || !msg.message) return;
         
         const sender = msg.key.remoteJid;
         const messageText = msg.message?.conversation || 
                            msg.message?.extendedTextMessage?.text || '';
         
-        // Log pesan
         console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
 
-        // Proses command
         if (messageText.startsWith(config.PREFIX)) {
             await handleCommand(sock, sender, messageText);
         } else {
-            // AI Chat (tanpa prefix)
             await handleAIChat(sock, sender, messageText);
         }
     });
