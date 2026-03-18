@@ -9,7 +9,6 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const config = require('./config');
 
-// Simpan history chat per user
 const chatHistory = new Map();
 
 async function connectToWhatsApp() {
@@ -18,43 +17,36 @@ async function connectToWhatsApp() {
     
     const sock = makeWASocket({
         version,
-        printQRInTerminal: true,  // QR mode (paling stabil)
         auth: state,
         browser: ['Ubuntu', 'Chrome', '20.0.04'],
     });
 
-    // Save credentials
     sock.ev.on('creds.update', saveCreds);
 
-    // Handle connection
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
+        // ✅ FIX: Generate QR manual
         if (qr) {
-            console.log('\n📱 SCAN QR CODE DI ATAS DENGAN WHATSAPP ANDA\n');
+            console.log('\n📱 SCAN QR CODE DI BAWAH INI:\n');
+            qrcode.generate(qr, { small: true });
         }
         
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('❌ Koneksi terputus, reconnecting...');
-            if (shouldReconnect) {
-                connectToWhatsApp();
-            }
+            if (shouldReconnect) connectToWhatsApp();
         } else if (connection === 'open') {
             console.log('✅ BOT BERHASIL TERHUBUNG!');
-            console.log('🤖 Siap menerima pesan...\n');
         }
     });
 
-    // Handle pesan masuk
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
-        
         if (msg.key.fromMe || !msg.message) return;
         
         const sender = msg.key.remoteJid;
-        const messageText = msg.message?.conversation || 
-                           msg.message?.extendedTextMessage?.text || '';
+        const messageText = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
         
         console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
 
@@ -66,7 +58,6 @@ async function connectToWhatsApp() {
     });
 }
 
-// ==================== HANDLE COMMAND ====================
 async function handleCommand(sock, sender, text) {
     const args = text.slice(config.PREFIX.length).trim().split(' ');
     const command = args.shift().toLowerCase();
@@ -75,46 +66,30 @@ async function handleCommand(sock, sender, text) {
     switch(command) {
         case 'help':
         case 'menu':
-            const menu = `
-🤖 *NAZE AI BOT*
-
-*Perintah:*
-${config.PREFIX}help - Menu bantuan
-${config.PREFIX}ai <pertanyaan> - Chat dengan AI
-${config.PREFIX}clear - Hapus history chat
-${config.PREFIX}owner - Hubungi owner
-
-*Cara Pakai:*
-Kirim pesan apa saja untuk chat langsung dengan AI!
-            `;
+            const menu = `🤖 *NAZE AI BOT*\n\n*Perintah:*\n${config.PREFIX}help - Menu\n${config.PREFIX}ai <tanya> - Chat AI\n${config.PREFIX}clear - Hapus history\n${config.PREFIX}owner - Kontak owner`;
             await sock.sendMessage(sender, { text: menu });
             break;
-
         case 'ai':
             if (!query) {
-                await sock.sendMessage(sender, { text: '❌ Contoh: ' + config.PREFIX + 'ai apa itu javascript?' });
+                await sock.sendMessage(sender, { text: '❌ Contoh: ' + config.PREFIX + 'ai halo' });
                 return;
             }
-            await sock.sendMessage(sender, { text: '⏳ Sedang memproses...' });
+            await sock.sendMessage(sender, { text: '⏳ Memproses...' });
             const aiResponse = await callNazeAPI(query, sender);
             await sock.sendMessage(sender, { text: aiResponse });
             break;
-
         case 'clear':
             chatHistory.delete(sender);
-            await sock.sendMessage(sender, { text: '✅ History chat berhasil dihapus!' });
+            await sock.sendMessage(sender, { text: '✅ History dihapus!' });
             break;
-
         case 'owner':
-            await sock.sendMessage(sender, { text: `👤 Owner: wa.me/${config.OWNER}` });
+            await sock.sendMessage(sender, { text: `👤 wa.me/${config.OWNER}` });
             break;
-
         default:
-            await sock.sendMessage(sender, { text: '❌ Command tidak dikenal. Ketik ' + config.PREFIX + 'help' });
+            await sock.sendMessage(sender, { text: '❌ Command tidak dikenal' });
     }
 }
 
-// ==================== HANDLE AI CHAT ====================
 async function handleAIChat(sock, sender, text) {
     try {
         await sock.sendPresenceUpdate('composing', sender);
@@ -122,17 +97,14 @@ async function handleAIChat(sock, sender, text) {
         await sock.sendPresenceUpdate('paused', sender);
         await sock.sendMessage(sender, { text: response });
     } catch (error) {
-        console.error('Error:', error);
-        await sock.sendMessage(sender, { text: '❌ Terjadi kesalahan, coba lagi nanti.' });
+        await sock.sendMessage(sender, { text: '❌ Error, coba lagi.' });
     }
 }
 
-// ==================== CALL NAZE API ====================
 async function callNazeAPI(prompt, userId) {
     try {
         let messages = chatHistory.get(userId) || [];
         messages.push({ role: 'user', content: prompt });
-        
         if (messages.length > 10) messages = messages.slice(-10);
 
         const params = new URLSearchParams({
@@ -142,38 +114,20 @@ async function callNazeAPI(prompt, userId) {
         });
 
         const url = `${config.NAZE_API.baseUrl}?${params.toString()}`;
+        const response = await axios.get(url, { timeout: 60000 });
         
-        const response = await axios.get(url, {
-            timeout: 60000,
-            headers: { 'User-Agent': 'Mozilla/5.0' }
-        });
-
-        let aiResponse = '';
-        
-        if (typeof response.data === 'string') {
-            aiResponse = response.data;
-        } else if (response.data.result) {
-            aiResponse = response.data.result;
-        } else if (response.data.data) {
-            aiResponse = response.data.data;
-        } else if (response.data.message) {
-            aiResponse = response.data.message;
-        } else {
-            aiResponse = JSON.stringify(response.data);
-        }
+        let aiResponse = typeof response.data === 'string' ? response.data : 
+                        response.data.result || response.data.data || 
+                        response.data.message || JSON.stringify(response.data);
 
         messages.push({ role: 'assistant', content: aiResponse });
         chatHistory.set(userId, messages);
-
         return aiResponse;
-
     } catch (error) {
-        console.error('API Error:', error.message);
         return '❌ Gagal menghubungi AI.';
     }
 }
 
-// ==================== START BOT ====================
 console.log('🚀 Starting Naze AI Bot...');
 console.log('📱 Tunggu QR Code...\n');
 
