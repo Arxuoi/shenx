@@ -246,4 +246,46 @@ async function callNazeAPI(prompt, userId) {
 console.log('🚀 Starting Naze AI Bot...');
 console.log('📡 Menunggu QR Code...\n');
 
-connectToWhatsApp();
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+    const { version } = await fetchLatestBaileysVersion();
+    
+    // Tanya nomor WhatsApp
+    const phoneNumber = await question('📱 Masukkan nomor WhatsApp (628xxxxx): ');
+    
+    // Bersihkan nomor (hapus spasi, +, -)
+    const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+    
+    const sock = makeWASocket({
+        version,
+        printQRInTerminal: false,  // Matikan QR
+        auth: state,  // ✅ FIX: langsung pakai state
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        logger: console,
+        markOnlineOnConnect: true,
+    });
+
+    // Pairing code logic - TUNGGU SOCKET READY
+    if (!sock.authState.creds.registered) {
+        console.log('⏳ Requesting pairing code...');
+        
+        try {
+            // ✅ FIX: Tunggu 2 detik biar socket ready
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            const code = await sock.requestPairingCode(cleanNumber);
+            
+            console.log('\n🔑 PAIRING CODE ANDA:');
+            console.log('═══════════════════════');
+            console.log('       ' + code);
+            console.log('═══════════════════════');
+            console.log('Buka WhatsApp → Menu (3 titik) → Perangkat Tertaut → Tautkan Perangkat');
+            console.log('Pilih "Tautkan dengan nomor telepon"\n');
+            
+        } catch (err) {
+            console.error('❌ Gagal request pairing code:', err.message);
+            console.log('🔄 Mencoba method QR...');
+            // Fallback ke QR kalau pairing gagal
+        }
+    
+    
