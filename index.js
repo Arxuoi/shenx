@@ -42,21 +42,34 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (msg.key.fromMe || !msg.message) return;
-        
-        const sender = msg.key.remoteJid;
-        const messageText = msg.message?.conversation || 
-                           msg.message?.extendedTextMessage?.text || '';
-        
-        console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
+    const msg = m.messages[0];
+    if (msg.key.fromMe || !msg.message) return;
+    
+    const sender = msg.key.remoteJid;
+    
+    // ✅ FIX: Cek semua jenis pesan
+    let messageText = '';
+    
+    if (msg.message.conversation) {
+        messageText = msg.message.conversation;
+    } else if (msg.message.extendedTextMessage?.text) {
+        messageText = msg.message.extendedTextMessage.text;
+    } else if (msg.message.imageMessage?.caption) {
+        messageText = msg.message.imageMessage.caption;
+    } else if (msg.message.videoMessage?.caption) {
+        messageText = msg.message.videoMessage.caption;
+    }
+    
+    console.log(`[${new Date().toLocaleTimeString()}] ${sender}: ${messageText}`);
 
-        if (messageText.startsWith(config.PREFIX)) {
-            await handleCommand(sock, sender, messageText, msg);
-        } else {
-            await handleAIChat(sock, sender, messageText);
-        }
-    });
+    if (messageText.startsWith(config.PREFIX)) {
+        await handleCommand(sock, sender, messageText, msg);
+    } else if (messageText) {
+        // Hanya chat AI kalau ada text
+        await handleAIChat(sock, sender, messageText);
+    }
+});
+    
 }
 
 // ==================== HANDLE COMMAND ====================
@@ -224,47 +237,44 @@ async function downloadAIO(sock, sender, url) {
             text: `✅ *Download Berhasil*\n\n📱 Platform: ${result.platform || 'TikTok'}\n👤 Author: ${result.author || 'Unknown'}\n\n⏳ Mengirim video...` 
         });
         
-        // ✅ FIX: Kirim sebagai dokumen kalau tunnel
-        try {
-            await sock.sendMessage(sender, {
-                video: { url: videoUrl },
-                caption: '🎥 Video'
-            });
-        } catch (videoError) {
-            // Kalau gagal, kirim link saja
-            await sock.sendMessage(sender, { 
-                text: `✅ *Download Link*\n\n🎥 Video: ${videoUrl}\n\nKlik link untuk download.` 
-            });
-        }
-        
-    } catch (error) {
-        console.error('Download Error:', error.message);
-        await sock.sendMessage(sender, { text: '❌ Error: ' + error.message });
-    }
+        /// Di downloadAIO, ganti bagian kirim video:
+
+try {
+    await sock.sendMessage(sender, {
+        video: { url: videoUrl },
+        caption: '🎥 Video'
+    });
+} catch (videoError) {
+    console.error('Video send error:', videoError.message);
+    // ✅ FIX: Kirim link saja
+    await sock.sendMessage(sender, { 
+        text: `✅ *Download Berhasil*\n\n🎥 Video: ${videoUrl}\n\nKlik link untuk download.` 
+    });
 }
-
-
 
 // ==================== HD REMINI ====================
 async function hdRemini(sock, sender, msg) {
     try {
-        // ✅ FIX: Cek imageMessage dengan caption
-        const imageMessage = msg.message?.imageMessage || 
-                            msg.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
+        // Cek apakah ada foto
+        const imageMessage = msg.message?.imageMessage;
         
         if (!imageMessage) {
-            await sock.sendMessage(sender, { text: '❌ Kirim foto dengan caption *.hd*' });
+            await sock.sendMessage(sender, { 
+                text: '❌ Kirim foto dengan caption *.hd*' 
+            });
             return;
         }
         
         await sock.sendMessage(sender, { text: '⏳ Proses HD...' });
         
-        // Download
+        // Download foto
         const stream = await sock.downloadContentFromMessage(imageMessage, 'image');
         let buffer = Buffer.from([]);
-        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+        for await (const chunk of stream) {
+            buffer = Buffer.concat([buffer, chunk]);
+        }
         
-        // Upload ke Naze
+        // Upload
         const form = new FormData();
         form.append('file', buffer, { filename: 'image.jpg' });
         
@@ -274,8 +284,14 @@ async function hdRemini(sock, sender, msg) {
             { headers: form.getHeaders(), timeout: 60000 }
         );
         
+        console.log('Upload response:', uploadRes.data);
+        
         const imageUrl = uploadRes.data.result?.url || uploadRes.data.url;
-        if (!imageUrl) throw new Error('Upload gagal');
+        
+        if (!imageUrl) {
+            await sock.sendMessage(sender, { text: '❌ Upload gagal' });
+            return;
+        }
         
         // HD
         const hdRes = await axios.get(
@@ -283,8 +299,14 @@ async function hdRemini(sock, sender, msg) {
             { timeout: 120000 }
         );
         
-        if (!hdRes.data.result) throw new Error('HD gagal');
+        console.log('HD response:', hdRes.data);
         
+        if (!hdRes.data.result) {
+            await sock.sendMessage(sender, { text: '❌ HD gagal: ' + JSON.stringify(hdRes.data) });
+            return;
+        }
+        
+        // Kirim hasil
         await sock.sendMessage(sender, {
             image: { url: hdRes.data.result },
             caption: '✅ HD Berhasil!'
@@ -295,6 +317,7 @@ async function hdRemini(sock, sender, msg) {
         await sock.sendMessage(sender, { text: '❌ Error: ' + error.message });
     }
 }
+        
 
 
 // ==================== BRAT GENERATOR ====================
